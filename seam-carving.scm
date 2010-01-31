@@ -208,15 +208,17 @@
   #t)
 
 (define (image::carve-seam image seam)
-  (vector-for-each
-   (lambda (y row)
-     (let ((seam-x (caar seam))
-	   (seam-y (cdar seam)))
-       (do ((x seam-x (+ x 1)))
-	   ((>= x (- (image:width image) 1)))
-	 (image:set-pixel image x y (image:get-pixel image (+ x 1) y)))
-       (set! seam (cdr seam))))
-   (image:data image))
+  (let* ((width (image:width image))
+	 (new-width (- width 1)))
+    (vector-map!
+     (lambda (y row)
+       (let ((seam-x (caar seam))
+	     (seam-y (cdar seam))
+	     (new-row (vector-copy row 0 new-width)))
+	 (vector-copy! new-row seam-x
+		       row (+ seam-x 1) width)
+	 new-row))
+     (image:data image)))
   #t)
 
 (define (image::mark-seam image seam)
@@ -307,102 +309,68 @@
 			    (- y 1))))))))))))
 
 (define (image::make-energy-map image . rest)
-  (let1 type (if (null? rest) 'simple-diff (car rest))
-    (case type
-      ((simple-diff)
-       (image::make-energy-map-simple-diff image))
-      (else
-       (error "No such energy type: ~s" type)))))
+  (apply image::make-energy-map-simple-diff image rest))
 
 (define (image::sobel-operator-x image x y)
-  (pixel:- (pixel:+ (image:get-pixel image (+ x 1) (- y 1) #t)
-		    (pixel:scale 2 (image:get-pixel image (+ x 1) y #t))
-		    (image:get-pixel image (+ x 1) (+ y 1) #t))
-	   (image:get-pixel image (- x 1) (- y 1) #t)
-	   (pixel:scale 2 (image:get-pixel image (- x 1) y #t))
-	   (image:get-pixel image (- x 1) (+ y 1) #t)))
+  (- (+ (image:get-pixel image (+ x 1) (- y 1) #t)
+	(* 2 (image:get-pixel image (+ x 1) y #t))
+	(image:get-pixel image (+ x 1) (+ y 1) #t))
+     (image:get-pixel image (- x 1) (- y 1) #t)
+     (* 2 (image:get-pixel image (- x 1) y #t))
+     (image:get-pixel image (- x 1) (+ y 1) #t)))
 
 (define (image::sobel-operator-y image x y)
-  (pixel:- (pixel:+ (image:get-pixel image (- x 1) (+ y 1) #t)
-		    (pixel:scale 2 (image:get-pixel image x (+ y 1) #t))
-		    (image:get-pixel image (+ x 1) (+ y 1) #t))
-	   (image:get-pixel image (- x 1) (- y 1) #t)
-	   (pixel:scale 2 (image:get-pixel image x (- y 1) #t))
-	   (image:get-pixel image (+ x 1) (- y 1) #t)))
+  (- (+ (image:get-pixel image (- x 1) (+ y 1) #t)
+	(* 2 (image:get-pixel image x (+ y 1) #t))
+	(image:get-pixel image (+ x 1) (+ y 1) #t))
+     (image:get-pixel image (- x 1) (- y 1) #t)
+     (* 2 (image:get-pixel image x (- y 1) #t))
+     (image:get-pixel image (+ x 1) (- y 1) #t)))
 
-(define (image::sobel-operator-abs-x image x y)
-  (- (+ (pixel:norm (image:get-pixel image (+ x 1) (- y 1) #t))
-	(* 2 (pixel:norm (image:get-pixel image (+ x 1) y #t)))
-	(pixel:norm (image:get-pixel image (+ x 1) (+ y 1) #t)))
-     (pixel:norm (image:get-pixel image (- x 1) (- y 1) #t))
-     (* 2 (pixel:norm (image:get-pixel image (- x 1) y #t)))
-     (pixel:norm (image:get-pixel image (- x 1) (+ y 1) #t))))
-
-(define (image::sobel-operator-abs-y image x y)
-  (- (+ (pixel:norm (image:get-pixel image (- x 1) (+ y 1) #t))
-	(* 2 (pixel:norm (image:get-pixel image x (+ y 1) #t)))
-	(pixel:norm (image:get-pixel image (+ x 1) (+ y 1) #t)))
-     (pixel:norm (image:get-pixel image (- x 1) (- y 1) #t))
-     (* 2 (pixel:norm (image:get-pixel image x (- y 1) #t)))
-     (pixel:norm (image:get-pixel image (+ x 1) (- y 1) #t))))
-
-(define (image::make-energy-map-simple-diff-rgb image)
+(define (image::make-energy-map-simple-diff image . rest)
   "Simple differential"
-  (let ((energy-map (image::create (image:width image)
-				  (image:height image)))
-	(max-energy 0))
-    (dotimes (y (image:height image))
-      (dotimes (x (image:width image))
-	(let ((dx (pixel:abs! (image::sobel-operator-x image x y)))
-	      (dy (pixel:abs! (image::sobel-operator-y image x y))))
-	  (let1 e (pixel:+ dx dy)
-	    (image:set-pixel energy-map x y e)
-	    (when (> (pixel:r e) max-energy)
-	      (set! max-energy (pixel:r e)))
-	    (when (> (pixel:g e) max-energy)
-	      (set! max-energy (pixel:g e)))
-	    (when (> (pixel:b e) max-energy)
-	      (set! max-energy (pixel:b e)))))))
+  (let-optionals* rest
+      ((normalize? #f))
+    (let* ((norm-map
+	    (image::create
+	     (image:width image) (image:height image)
+	     (vector-map
+	      (lambda (y row)
+		(vector-map
+		 (lambda (x pixel)
+		   (pixel:norm pixel))
+		 row))
+	      (image:data image))))
+	   (energy-map (image::create (image:width image)
+				      (image:height image)))
+	   (max-energy 0))
+      (vector-for-each
+       (lambda (y row)
+	 (vector-map!
+	  (lambda (x _)
+	    (let ((dx (abs (image::sobel-operator-x norm-map x y)))
+		  (dy (abs (image::sobel-operator-y norm-map x y))))
+	      (let1 e (round->exact (+ dx dy))
+		(when (> (pixel:r e) max-energy)
+		  (set! max-energy (pixel:r e)))
+		(when (> (pixel:g e) max-energy)
+		  (set! max-energy (pixel:g e)))
+		(when (> (pixel:b e) max-energy)
+		  (set! max-energy (pixel:b e)))
+		e)))
+	  row))
+       (image:data energy-map))
     
-    ;; normalize
-    (when (> max-energy 255)
-      (let1 scale (/ 255 max-energy)
-	(dotimes (y (image:height energy-map))
-	  (dotimes (x (image:width energy-map))
-	    (image:set-pixel
-	     energy-map x y
-	     (pixel:scale! scale (image:get-pixel energy-map x y)))))))
-    energy-map
-    ))
-
-(define (image::make-energy-map-simple-diff image)
-  "Simple differential"
-  (let ((energy-map (image::create (image:width image)
-				  (image:height image)))
-	(max-energy 0))
-    (dotimes (y (image:height image))
-      (dotimes (x (image:width image))
-	(let ((dx (abs (image::sobel-operator-abs-x image x y)))
-	      (dy (abs (image::sobel-operator-abs-y image x y))))
-	  (let1 e (round->exact (+ dx dy))
-	    (image:set-pixel energy-map x y e)
-	    (when (> (pixel:r e) max-energy)
-	      (set! max-energy (pixel:r e)))
-	    (when (> (pixel:g e) max-energy)
-	      (set! max-energy (pixel:g e)))
-	    (when (> (pixel:b e) max-energy)
-	      (set! max-energy (pixel:b e)))))))
-    
-    ;; normalize
-    (when (> max-energy 255)
-      (let1 scale (/ 255 max-energy)
-	(dotimes (y (image:height energy-map))
-	  (dotimes (x (image:width energy-map))
-	    (image:set-pixel energy-map x y
-			     (round->exact 
-			      (* scale (image:get-pixel energy-map x y))))))))
+      ;; normalize
+      (when (and #?=normalize? (> max-energy 255))
+	(let1 scale (/ 255 max-energy)
+	  (dotimes (y (image:height energy-map))
+	    (dotimes (x (image:width energy-map))
+	      (image:set-pixel energy-map x y
+			       (round->exact 
+				(* scale (image:get-pixel energy-map x y))))))))
       energy-map
-      ))
+      )))
 
 
 (define (image::seam-carving image width height)

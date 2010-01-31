@@ -3,6 +3,7 @@
 
 (use srfi-1)  ;; List library
 (use srfi-13) ;; String library
+(use srfi-27) ;; Random library
 (use srfi-43) ;; Vector library
 (use gauche.parseopt)
 (use binary.io)
@@ -116,6 +117,12 @@
 (define (image:height image)
   (cdr (assq 'height image)))
 
+(define (image:set-width! image width)
+  (set-cdr! (assq 'width image) width))
+
+(define (image:set-height! image height)
+  (set-cdr! (assq 'height image) height))
+
 (define (image::load-ppm-raw path)
   (with-input-from-file path
     (lambda ()
@@ -147,16 +154,14 @@
       (print "P6")
       (format #t "~d ~d\n" (image:width image) (image:height image))
       (print "255")
-      (vector-for-each
-       (lambda (idx row)
-	 (vector-for-each
-	  (lambda (idx pixel)
+      (dotimes (y (image:height image))
+	(dotimes (x (image:width image))
+	  (let1 pixel (image:get-pixel image x y)
 	    (write-byte (pixel:r pixel #t))
 	    (write-byte (pixel:g pixel #t))
-	    (write-byte (pixel:b pixel #t)))
-	  row))
-       (image:data image))))
-      #t)
+	    (write-byte (pixel:b pixel #t)))))))
+  #t)
+
 
 (define (image::create width height . rest)
   (let1 data (if (not (null? rest))
@@ -166,6 +171,15 @@
 		       ((>= i height) rows)
 		     (vector-set! rows i (make-vector width #f)))))
     `((width . ,width) (height . ,height) (data . ,data))))
+
+(define (image::clone image)
+  (let ((image-data (image:data image))
+	(data (make-vector (image:height image))))
+    (dotimes (y (image:height image))
+      (vector-set! data y (vector-copy (vector-ref image-data y))))
+    (image::create (image:width image)
+		   (image:height image)
+		   data)))
 
 (define (image::parse-size size-str)
   (with-input-from-string size-str
@@ -181,12 +195,116 @@
   "Carve a seam horizontally."
   'todo)
 
-(define (image::sc-vertically image)
+(define (image::sc-vertically image size)
   "Carve a seam vertically."
-  (let* ((energy-map (image::make-energy-map image))
-	 (seam (image::find-vertical-seam energy-map)))
-    (image::carve-seam image seam))
+  (dotimes (i size)
+    (let ((energy-map (image::make-energy-map image)))
+      (let1 seam (image::find-vertical-seam energy-map)
+	(image::carve-seam image seam)
+	(image:set-width! image (- (image:width image) 1))
+	(image::carve-seam energy-map seam)
+	(image:set-width! energy-map (- (image:width energy-map) 1))
+	)))
   #t)
+
+(define (image::carve-seam image seam)
+  (vector-for-each
+   (lambda (y row)
+     (let ((seam-x (caar seam))
+	   (seam-y (cdar seam)))
+       (do ((x seam-x (+ x 1)))
+	   ((>= x (- (image:width image) 1)))
+	 (image:set-pixel image x y (image:get-pixel image (+ x 1) y)))
+       (set! seam (cdr seam))))
+   (image:data image))
+  #t)
+
+(define (image::mark-seam image seam)
+  (dotimes (y (image:height image))
+    (let ((seam-x (caar seam))
+	  (seam-y (cdar seam)))
+      (unless (eq? y seam-y)
+	(error ""))
+      (image:set-pixel image seam-x seam-y
+		       (pixel:create 255 0 0))
+      (set! seam (cdr seam)))))
+
+(define (image::find-vertical-seam energy-map)
+  (let ((width (image:width energy-map))
+	(height (image:height energy-map)))
+    (let* ((range-width 50)
+	   (init-search-begin
+	    (random-integer (max (- width range-width) 0))
+	    )
+	   (init-search-end
+	    (min (max (+ init-search-begin range-width)
+		      (- width 1)))))
+      (let1 start-x
+	  (let loop((min-energy 0)
+		    (min-x init-search-begin)
+		    (x 0))
+	    (if (<= x init-search-end)
+		(if (> min-energy (image:get-pixel energy-map x 0))
+		    (loop (image:get-pixel energy-map x 0) x (+ x 1))
+		    (loop min-energy min-x (+ x 1)))
+		min-x))
+	(let ((cost-map (image::create width height)))
+	  (image:set-pixel cost-map start-x 0 (cons 0 #f))
+	  (let ((choose-prevline-minpixel
+		 (lambda (x y)
+		   (dec! y)
+		   (let ((left (image:get-pixel cost-map (- x 1) y #f))
+			 (center (image:get-pixel cost-map x y #f))
+			 (right (image:get-pixel cost-map (+ x 1) y #f)))
+		     (let ((min-x 0)
+			   (min-cost +inf.0))
+		       (when (and left (< (car left) min-cost))
+			 (set! min-x (- x 1))
+			 (set! min-cost (car left)))
+		       (when (and center (<= (car center) min-cost))
+			 (set! min-x x)
+			 (set! min-cost (car center)))
+		       (when (and right (< (car right) min-cost))
+			 (set! min-x (+ x 1))
+			 (set! min-cost (car right)))
+		       (values min-cost min-x)
+		       )))))
+	    (do ((y 1 (+ y 1)))
+		((>= y height))
+	      (do ((x (max 0 (- start-x y)) (+ x 1)))
+		  ((>= x (min (+ start-x y) width)))
+		(receive (min-cost min-x)
+		    (choose-prevline-minpixel x y)
+		  (image:set-pixel
+		   cost-map x y
+		   (cons (+ (image:get-pixel energy-map x y) min-cost)
+			 min-x))))
+	      )
+
+	    ;; cost map was build. backtrace it
+	    ;; first, find end point
+	    (let* ((min-energy-x (max 0 (+ 1 (- start-x height))))
+		   (min-energy-cost-pixel (image:get-pixel cost-map
+							   min-energy-x
+							   (- height 1))))
+	      #?=(min (- (+ start-x height) 1)
+			      (- width 1))
+	      (do ((x #?=(max 0 (+ 1 (- start-x height))) (+ x 1)))
+		  ((>= x (min (- (+ start-x height) 1)
+			      (- width 1))))
+		(let ((cost-pixel (image:get-pixel cost-map x (- height 1))))
+		  (when (< (car cost-pixel) (car min-energy-cost-pixel))
+		    (set! min-energy-cost-pixel cost-pixel)
+		    (set! min-energy-x x))))
+	      (let loop((seam ())
+			(x min-energy-x)
+			(y (- height 1)))
+		(if (< y 0)
+		    seam
+		    (let1 cost-pixel (image:get-pixel cost-map x y)
+		      (loop (cons (cons x y) seam)
+			    (cdr cost-pixel)
+			    (- y 1))))))))))))
 
 (define (image::make-energy-map image . rest)
   (let1 type (if (null? rest) 'simple-diff (car rest))
@@ -285,6 +403,7 @@
 			      (* scale (image:get-pixel energy-map x y))))))))
       energy-map
       ))
+
 
 (define (image::seam-carving image width height)
   (let ((width-delta (- (image:width image) width))

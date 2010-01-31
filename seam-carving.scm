@@ -291,11 +291,10 @@
 	(let ((cost-map (image::create width height)))
 	  (image:set-pixel cost-map start-x 0 (cons 0 #f))
 	  (let ((choose-prevline-minpixel
-		 (lambda (x y)
-		   (dec! y)
-		   (let ((left (image:get-pixel cost-map (- x 1) y #f))
-			 (center (image:get-pixel cost-map x y #f))
-			 (right (image:get-pixel cost-map (+ x 1) y #f)))
+		 (lambda (x prev-row)
+		   (let ((left (image:row-get-pixel prev-row (- x 1) #f))
+			 (center (image:row-get-pixel prev-row x #f))
+			 (right (image:row-get-pixel prev-row (+ x 1) #f)))
 		     (let ((min-x 0)
 			   (min-cost +inf.0))
 		       (when (and left (< (car left) min-cost))
@@ -309,21 +308,25 @@
 			 (set! min-cost (car right)))
 		       (values min-cost min-x)
 		       )))))
-	    (do ((y 1 (+ y 1)))
-		((>= y height))
-	      (do ((x (max 0 (- start-x y)) (+ x 1)))
-		  ((>= x (min (+ start-x y) width)))
-		(receive (min-cost min-x)
-		    (choose-prevline-minpixel x y)
-		  (image:set-pixel
-		   cost-map x y
-		   (cons (+ (image:get-pixel energy-map x y) min-cost)
-			 min-x))))
-	      )
+	    (let1 prev-row (vector-ref (image:data cost-map) 0)
+	      (vector-for-each
+	       (lambda (y row)
+		 (unless (eq? y 0)
+		   (do ((x (max 0 (- start-x y)) (+ x 1)))
+		       ((>= x (min (+ start-x y) width)))
+		     (receive (min-cost min-x)
+			 (choose-prevline-minpixel x prev-row)
+		       (vector-set!
+			row x
+			(cons (+ (image:get-pixel energy-map x y) min-cost)
+			      min-x)))))
+		 (set! prev-row row))
+	       (image:data cost-map)))
+	    )
 
 	    ;; cost map was build. backtrace it
 	    ;; first, find end point
-	    (let* ((min-energy-x (max 0 (+ 1 (- start-x height))))
+	  (let* ((min-energy-x (max 0 (+ 1 (- start-x height))))
 		   (min-energy-cost-pixel (image:get-pixel cost-map
 							   min-energy-x
 							   (- height 1))))
@@ -344,7 +347,7 @@
 		    (let1 cost-pixel (image:get-pixel cost-map x y)
 		      (loop (cons (cons x y) seam)
 			    (cdr cost-pixel)
-			    (- y 1))))))))))))
+			    (- y 1)))))))))))
 
 (define (image::make-energy-map image . rest)
   (apply image::make-energy-map-simple-diff image rest))

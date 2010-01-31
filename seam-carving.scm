@@ -6,6 +6,7 @@
 (use srfi-27) ;; Random library
 (use srfi-43) ;; Vector library
 (use gauche.parseopt)
+(use gauche.process)
 (use binary.io)
 
 (define (load-image path)
@@ -123,43 +124,61 @@
 (define (image:set-height! image height)
   (set-cdr! (assq 'height image) height))
 
-(define (image::load-ppm-raw path)
-  (with-input-from-file path
-    (lambda ()
-      (let ((fmt (read-line))
-	    (comment (if (eq? #\# (peek-char ))
-			 (read-line)
-			 #f))
-	    (size (read-line))
-	    (max-brightness (read-line)))
-	(format #t "fmt: ~s\ncomment: ~s\nsize: ~s\nmax-brightness: ~s\n"
-		fmt comment size max-brightness)
-	(unless (equal? "P6" fmt)
-	  (error "Invliad format file '~s': '~s'" path fmt))
-	(receive (width height) (image::parse-size size)
-	  (let ((image (image::create width height)))
-	    (dotimes (y height)
-	      (dotimes (x width)
-		(let ((r (read-byte))
-		      (g (read-byte))
-		      (b (read-byte)))
-		  (let1 pixel (pixel:create r g b)
-		    (image:set-pixel image x y pixel)))))
-	    image))
-	))))
+(define (image::load-ppm-raw input)
+  (let1 input-port (if (string? input)
+		       (open-input-file input)
+		       input)
+    (unwind-protect
+	(with-input-from-port input-port
+	  (lambda ()
+	    (let ((fmt (read-line))
+		  (comment (if (eq? #\# (peek-char ))
+			       (read-line)
+			       #f))
+		  (size (read-line))
+		  (max-brightness (read-line)))
+	      (format #t "fmt: ~s\ncomment: ~s\nsize: ~s\nmax-brightness: ~s\n"
+		      fmt comment size max-brightness)
+	      (unless (equal? "P6" fmt)
+		(error "Invliad format file '~s': '~s'" path fmt))
+	      (receive (width height) (image::parse-size size)
+		(let ((image (image::create width height)))
+		  (dotimes (y height)
+		    (dotimes (x width)
+		      (let ((r (read-byte))
+			    (g (read-byte))
+			    (b (read-byte)))
+			(let1 pixel (pixel:create r g b)
+			  (image:set-pixel image x y pixel)))))
+		  image))
+	      )))
+      (when (string? input)
+	(close-input-port input-port)))))
 
-(define (image::save-ppm-raw image path)
-  (with-output-to-file path
-    (lambda ()
-      (print "P6")
-      (format #t "~d ~d\n" (image:width image) (image:height image))
-      (print "255")
-      (dotimes (y (image:height image))
-	(dotimes (x (image:width image))
-	  (let1 pixel (image:get-pixel image x y)
-	    (write-byte (pixel:r pixel #t))
-	    (write-byte (pixel:g pixel #t))
-	    (write-byte (pixel:b pixel #t)))))))
+(define (image::save-ppm-raw image output)
+  (let1 output-port (if (string? output)
+			(open-output-file output)
+			(begin
+			  (let1 proc (run-process `("display" "-")
+						  :input :pipe
+						  :wait #f)
+			    (process-input proc))))
+    (unwind-protect
+	(with-output-to-port output-port
+	  (lambda ()
+	    (print "P6")
+	    (format #t "~d ~d\n" (image:width image) (image:height image))
+	    (print "255")
+	    (dotimes (y (image:height image))
+	      (dotimes (x (image:width image))
+		(let1 pixel (image:get-pixel image x y)
+		  (write-byte (pixel:r pixel #t))
+		  (write-byte (pixel:g pixel #t))
+		  (write-byte (pixel:b pixel #t)))))))
+      (begin
+	(close-output-port output-port)
+	(unless (string? output)
+	  (process-wait-any)))))
   #t)
 
 
@@ -206,6 +225,14 @@
 	(image:set-width! energy-map (- (image:width energy-map) 1))
 	)))
   #t)
+
+(define (image::sc-vertically-file input output width-shrink)
+  (let1 image (image::load-ppm-raw input)
+    (image::sc-vertically image
+			  (or width-shrink
+			      (round->exact
+			       (/ (image:width image) 2))))
+    (image::save-ppm-raw image output)))
 
 (define (image::carve-seam image seam)
   (let* ((width (image:width image))
@@ -327,11 +354,23 @@
      (* 2 (image:get-pixel image x (- y 1) #t))
      (image:get-pixel image (+ x 1) (- y 1) #t)))
 
+(define (image::sobel-operator-horizontal
+	 x-1y-1 x+1y-1 x-1y x+1y x-1y+1 x+1y+1)
+  (- (+ x+1y-1 (* 2 x+1y) x+1y+1)
+     x-1y-1 (* 2 x-1y) x-1y+1))
+
+(define (image::sobel-operator-vertical
+	 x-1y-1 xy-1 x+1y-1 x-1y+1 xy+1 x+1y+1)
+  (- (+ x-1y+1 (* 2 xy+1) x+1y+1)
+     x-1y-1 (* 2 xy-1) x+1y-1))
+
 (define (image::make-energy-map-simple-diff image . rest)
   "Simple differential"
   (let-optionals* rest
       ((normalize? #f))
-    (let* ((norm-map
+    (let* ((width (image:width image))
+	   (height (image:height image))
+	   (norm-map
 	    (image::create
 	     (image:width image) (image:height image)
 	     (vector-map
@@ -346,19 +385,35 @@
 	   (max-energy 0))
       (vector-for-each
        (lambda (y row)
-	 (vector-map!
-	  (lambda (x _)
-	    (let ((dx (abs (image::sobel-operator-x norm-map x y)))
-		  (dy (abs (image::sobel-operator-y norm-map x y))))
-	      (let1 e (round->exact (+ dx dy))
-		(when (> (pixel:r e) max-energy)
-		  (set! max-energy (pixel:r e)))
-		(when (> (pixel:g e) max-energy)
-		  (set! max-energy (pixel:g e)))
-		(when (> (pixel:b e) max-energy)
-		  (set! max-energy (pixel:b e)))
-		e)))
-	  row))
+	 (let1 P (lambda (x dy) (image:get-pixel norm-map x (+ y dy) #f))
+	   (let ((x-1y-1 (P (- 0 1) -1)) (xy-1 (P 0 -1)) (x+1y-1 (P (+ 0 1) -1))
+		 (x-1y   (P (- 0 1) 0))  (xy   (P 0 0))  (x+1y   (P (+ 0 1) 0))
+		 (x-1y+1 (P (- 0 1) 1))  (xy+1 (P 0 1))  (x+1y+1 (P (+ 0 1) 1)))
+	     (vector-map!
+	      (lambda (x _)
+		(let ((dx (abs (image::sobel-operator-horizontal
+				x-1y-1 x+1y-1 x-1y x+1y x-1y+1 x+1y+1)))
+		      (dy (abs (image::sobel-operator-vertical
+				x-1y-1 xy-1 x+1y-1 x-1y+1 xy+1 x+1y+1))))
+		  (when (< x width)
+		    (set! x-1y-1   xy-1)
+		    (set! x-1y     xy  )
+		    (set! x-1y+1   xy+1)
+		    (set! xy-1     x+1y-1)
+		    (set! xy       x+1y  )
+		    (set! xy+1     x+1y+1)
+		    (set! x+1y-1   (P (+ x 2) -1))
+		    (set! x+1y     (P (+ x 2) 0))
+		    (set! x+1y+1   (P (+ x 2) +1)))
+		  (let1 e (round->exact (+ dx dy))
+		    (when (> (pixel:r e) max-energy)
+		      (set! max-energy (pixel:r e)))
+		    (when (> (pixel:g e) max-energy)
+		      (set! max-energy (pixel:g e)))
+		    (when (> (pixel:b e) max-energy)
+		      (set! max-energy (pixel:b e)))
+		    e)))
+	      row))))
        (image:data energy-map))
     
       ;; normalize
@@ -387,4 +442,11 @@
     image))
 
 (define (main args)
+  (let-args (cdr args)
+      ((output "-o|output=s" #f)
+       (width-shrink "-w|--width-shrink=i" #f)
+       . restargs)
+    (let-optionals* restargs
+	((input (standard-input-port)))
+      (image::sc-vertically-file input output width-shrink)))
   0)

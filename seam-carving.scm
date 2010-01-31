@@ -395,13 +395,11 @@
 				      (image:height image)))
 	   (max-energy 0)
 	   (norm-map-data (image:data norm-map)))
-      (vector-for-each
-       (lambda (y row)
-	 (let ((row-1 (vector-ref norm-map-data
-				  (max 0 (- y 1))))
-	       (row0  (vector-ref norm-map-data y))
-	       (row+1 (vector-ref norm-map-data
-				  (min (- height 1) (+ y 1)))))
+      (let ((row-1 (vector-ref norm-map-data 0))
+	    (row0  (vector-ref norm-map-data 0))
+	    (row+1 (vector-ref norm-map-data 1)))
+	(vector-for-each
+	 (lambda (y row)
 	   (let ((P-1 (lambda (x)
 			(image:row-get-pixel
 			 row-1 x #f)))
@@ -433,8 +431,13 @@
 		    (let1 e (+ dx dy)
 		      (set! max-energy (max e max-energy))
 		      e)))
-		row)))))
-       (image:data energy-map))
+		row)))
+	   (set! row-1 row0)
+	   (set! row0 row+1)
+	   (set! row+1 (if (>= y (- height 2))
+			   (vector-ref norm-map-data (- height 1))
+			   (vector-ref norm-map-data (+ y 2)))))
+	 (image:data energy-map)))
     
       ;; normalize
       (when (and #?=normalize? (> max-energy 255))

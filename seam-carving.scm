@@ -327,9 +327,9 @@
 		   (min-energy-cost-pixel (image:get-pixel cost-map
 							   min-energy-x
 							   (- height 1))))
-	      #?=(min (- (+ start-x height) 1)
-			      (- width 1))
-	      (do ((x #?=(max 0 (+ 1 (- start-x height))) (+ x 1)))
+	      (min (- (+ start-x height) 1)
+		   (- width 1))
+	      (do ((x (max 0 (+ 1 (- start-x height))) (+ x 1)))
 		  ((>= x (min (- (+ start-x height) 1)
 			      (- width 1))))
 		(let ((cost-pixel (image:get-pixel cost-map x (- height 1))))

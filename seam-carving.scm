@@ -82,9 +82,11 @@
   (pixel:abs! (reverse (reverse pixel))))
 
 (define (pixel:norm pixel)
-  (round->exact (sqrt (fold (lambda (x y)
-			      (+ (* x x) y))
-			    0 pixel))))
+  (let ((x (car pixel))
+	(y (cadr pixel))
+	(z (caddr pixel)))
+    (round->exact
+     (sqrt (+ (* x x) (* y y) (* z z))))))
 
 (define (image:get-pixel image x y . rest)
   (let ((width (image:width image))

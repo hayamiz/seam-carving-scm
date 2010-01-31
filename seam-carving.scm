@@ -228,8 +228,8 @@
 (define (image::sc-vertically image size)
   "Carve a seam vertically."
   (dotimes (i size)
-    (let ((energy-map (image::make-energy-map image)))
-      (let1 seam (image::find-vertical-seam energy-map)
+    (let ((energy-map (time (image::make-energy-map image))))
+      (let1 seam (time (image::find-vertical-seam energy-map))
 	(image::carve-seam image seam)
 	(image:set-width! image (- (image:width image) 1))
 	(image::carve-seam energy-map seam)

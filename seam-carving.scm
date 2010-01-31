@@ -363,15 +363,17 @@
      (* 2 (image:get-pixel image x (- y 1) #t))
      (image:get-pixel image (+ x 1) (- y 1) #t)))
 
-(define (image::sobel-operator-horizontal
-	 x-1y-1 x+1y-1 x-1y x+1y x-1y+1 x+1y+1)
-  (- (+ x+1y-1 (* 2 x+1y) x+1y+1)
-     x-1y-1 (* 2 x-1y) x-1y+1))
+(define-syntax image::sobel-operator-horizontal
+  (syntax-rules ()
+    ((_ x-1y-1 x+1y-1 x-1y x+1y x-1y+1 x+1y+1)
+     (- (+ x+1y-1 (* 2 x+1y) x+1y+1)
+	x-1y-1 (* 2 x-1y) x-1y+1))))
 
-(define (image::sobel-operator-vertical
-	 x-1y-1 xy-1 x+1y-1 x-1y+1 xy+1 x+1y+1)
-  (- (+ x-1y+1 (* 2 xy+1) x+1y+1)
-     x-1y-1 (* 2 xy-1) x+1y-1))
+(define-syntax image::sobel-operator-vertical
+  (syntax-rules ()
+    ((_ x-1y-1 xy-1 x+1y-1 x-1y+1 xy+1 x+1y+1)
+     (- (+ x-1y+1 (* 2 xy+1) x+1y+1)
+	x-1y-1 (* 2 xy-1) x+1y-1))))
 
 (define (image::make-energy-map-simple-diff image . rest)
   "Simple differential"
@@ -391,13 +393,14 @@
 	      (image:data image))))
 	   (energy-map (image::create (image:width image)
 				      (image:height image)))
-	   (max-energy 0))
+	   (max-energy 0)
+	   (norm-map-data (image:data norm-map)))
       (vector-for-each
        (lambda (y row)
-	 (let ((row-1 (vector-ref (image:data norm-map)
+	 (let ((row-1 (vector-ref norm-map-data
 				  (max 0 (- y 1))))
-	       (row0  (vector-ref (image:data norm-map) y))
-	       (row+1 (vector-ref (image:data norm-map)
+	       (row0  (vector-ref norm-map-data y))
+	       (row+1 (vector-ref norm-map-data
 				  (min (- height 1) (+ y 1)))))
 	   (let ((P-1 (lambda (x)
 			(image:row-get-pixel
@@ -416,19 +419,19 @@
 				  x-1y-1 x+1y-1 x-1y x+1y x-1y+1 x+1y+1)))
 			(dy (abs (image::sobel-operator-vertical
 				  x-1y-1 xy-1 x+1y-1 x-1y+1 xy+1 x+1y+1))))
-		    (when (< x width)
-		      (set! x-1y-1   xy-1)
-		      (set! x-1y     xy  )
-		      (set! x-1y+1   xy+1)
-		      (set! xy-1     x+1y-1)
-		      (set! xy       x+1y  )
-		      (set! xy+1     x+1y+1)
-		      (set! x+1y-1   (P-1 (+ x 2)))
-		      (set! x+1y     (P0  (+ x 2)))
-		      (set! x+1y+1   (P+1 (+ x 2))))
-		    (let1 e (round->exact (+ dx dy))
-		      (when (> e max-energy)
-			(set! max-energy e))
+		    (let1 x+2 (+ x 2)
+		      (when (< x width)
+			(set! x-1y-1   xy-1)
+			(set! x-1y     xy  )
+			(set! x-1y+1   xy+1)
+			(set! xy-1     x+1y-1)
+			(set! xy       x+1y  )
+			(set! xy+1     x+1y+1)
+			(set! x+1y-1   (P-1 x+2))
+			(set! x+1y     (P0  x+2))
+			(set! x+1y+1   (P+1 x+2))))
+		    (let1 e (+ dx dy)
+		      (set! max-energy (max e max-energy))
 		      e)))
 		row)))))
        (image:data energy-map))

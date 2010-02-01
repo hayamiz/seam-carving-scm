@@ -9,36 +9,20 @@
 (use gauche.process)
 (use binary.io)
 
-(define (load-image path)
-  "Load ppm"
-  'todo)
-
-(define (pixel:create r g b)
-  (list r g b))
-
+(define (pixel:create r g b) (list r g b))
 (define (pixel:get accessor pixel . rest)
-  (let ((val
-	 (if (list? pixel) (accessor pixel) pixel)))
+  (let ((val (if (list? pixel) (accessor pixel) pixel)))
     (if (null? rest)
 	val
 	(cond ((< val 0) 0)
 	      ((> val 255) 255)
 	      (else val)))))
 
-(define (pixel:r pixel . rest)
-  (apply pixel:get car pixel rest))
-
-(define (pixel:g pixel . rest)
-  (apply pixel:get cadr pixel rest))
-
-(define (pixel:b pixel . rest)
-  (apply pixel:get caddr pixel rest))
-
+(define (pixel:r pixel . rest) (apply pixel:get car pixel rest))
+(define (pixel:g pixel . rest) (apply pixel:get cadr pixel rest))
+(define (pixel:b pixel . rest) (apply pixel:get caddr pixel rest))
 (define (pixel:scale scale pixel)
-  (list (* scale (car pixel))
-	(* scale (cadr pixel))
-	(* scale (caddr pixel))))
-
+  (list (* scale (car pixel)) (* scale (cadr pixel)) (* scale (caddr pixel))))
 (define (pixel:scale! scale pixel)
   (let ((x (car pixel)) (xs (cdr pixel)))
     (set-car! pixel (round->exact (* scale x)))
@@ -53,9 +37,7 @@
     (if (null? pixels)
 	(list r g b)
 	(let1 pixel (car pixels)
-	  (loop (+ r (car pixel))
-		(+ g (car pixel))
-		(+ b (car pixel))
+	  (loop (+ r (car pixel)) (+ g (car pixel)) (+ b (car pixel))
 		(cdr pixels))))))
 
 (define (pixel:- pixel . pixels)
@@ -64,9 +46,7 @@
     (if (null? pixels)
 	(list r g b)
 	(let1 pixel (car pixels)
-	  (loop (+ r (car pixel))
-		(+ g (car pixel))
-		(+ b (car pixel))
+	  (loop (+ r (car pixel)) (+ g (car pixel)) (+ b (car pixel))
 		(cdr pixels))))))
 
 (define (pixel:abs! pixel)
@@ -78,15 +58,11 @@
 	(set-car! xs_ (abs x)))))
   pixel)
 
-(define (pixel:abs pixel)
-  (pixel:abs! (reverse (reverse pixel))))
+(define (pixel:abs pixel) (pixel:abs! (reverse (reverse pixel))))
 
 (define (pixel:norm pixel)
-  (let ((x (car pixel))
-	(y (cadr pixel))
-	(z (caddr pixel)))
-    (round->exact
-     (sqrt (+ (* x x) (* y y) (* z z))))))
+  (let ((x (car pixel))	(y (cadr pixel)) (z (caddr pixel)))
+    (round->exact (sqrt (+ (* x x) (* y y) (* z z))))))
 
 (define (image:get-pixel image x y . rest)
   (let ((width (image:width image))
@@ -120,20 +96,11 @@
 	(vector-set! row x pixel)
 	#f)))
 
-(define (image:data image)
-  (cdr (assq 'data image)))
-
-(define (image:width image)
-  (cdr (assq 'width image)))
-
-(define (image:height image)
-  (cdr (assq 'height image)))
-
-(define (image:set-width! image width)
-  (set-cdr! (assq 'width image) width))
-
-(define (image:set-height! image height)
-  (set-cdr! (assq 'height image) height))
+(define (image:data image) (cdr (assq 'data image)))
+(define (image:width image) (cdr (assq 'width image)))
+(define (image:height image) (cdr (assq 'height image)))
+(define (image:set-width! image width) (set-cdr! (assq 'width image) width))
+(define (image:set-height! image height) (set-cdr! (assq 'height image) height))
 
 (define (image::load-ppm-raw input)
   (let1 input-port (if (string? input)
@@ -220,10 +187,6 @@
 		 (integer? height))
 	    (values width height)
 	    (error "Invalid size string: ~s" size-str))))))
-
-(define (image::sc-horizontally image)
-  "Carve a seam horizontally."
-  'todo)
 
 (define (image::sc-vertically image size)
   "Carve a seam vertically."
@@ -352,22 +315,6 @@
 (define (image::make-energy-map image . rest)
   (apply image::make-energy-map-simple-diff image rest))
 
-(define (image::sobel-operator-x image x y)
-  (- (+ (image:get-pixel image (+ x 1) (- y 1) #t)
-	(* 2 (image:get-pixel image (+ x 1) y #t))
-	(image:get-pixel image (+ x 1) (+ y 1) #t))
-     (image:get-pixel image (- x 1) (- y 1) #t)
-     (* 2 (image:get-pixel image (- x 1) y #t))
-     (image:get-pixel image (- x 1) (+ y 1) #t)))
-
-(define (image::sobel-operator-y image x y)
-  (- (+ (image:get-pixel image (- x 1) (+ y 1) #t)
-	(* 2 (image:get-pixel image x (+ y 1) #t))
-	(image:get-pixel image (+ x 1) (+ y 1) #t))
-     (image:get-pixel image (- x 1) (- y 1) #t)
-     (* 2 (image:get-pixel image x (- y 1) #t))
-     (image:get-pixel image (+ x 1) (- y 1) #t)))
-
 (define-syntax image::sobel-operator-horizontal
   (syntax-rules ()
     ((_ x-1y-1 x+1y-1 x-1y x+1y x-1y+1 x+1y+1)
@@ -424,12 +371,9 @@
 				  x-1y-1 xy-1 x+1y-1 x-1y+1 xy+1 x+1y+1))))
 		    (let1 x+2 (+ x 2)
 		      (when (< x width)
-			(set! x-1y-1   xy-1)
-			(set! x-1y     xy  )
-			(set! x-1y+1   xy+1)
-			(set! xy-1     x+1y-1)
-			(set! xy       x+1y  )
-			(set! xy+1     x+1y+1)
+			(set! x-1y-1   xy-1)   (set! x-1y     xy  )
+			(set! x-1y+1   xy+1)   (set! xy-1     x+1y-1)
+			(set! xy       x+1y  ) (set! xy+1     x+1y+1)
 			(set! x+1y-1   (P-1 x+2))
 			(set! x+1y     (P0  x+2))
 			(set! x+1y+1   (P+1 x+2))))
@@ -437,8 +381,7 @@
 		      (set! max-energy (max e max-energy))
 		      e)))
 		row)))
-	   (set! row-1 row0)
-	   (set! row0 row+1)
+	   (set! row-1 row0) (set! row0 row+1)
 	   (set! row+1 (if (>= y (- height 2))
 			   (vector-ref norm-map-data (- height 1))
 			   (vector-ref norm-map-data (+ y 2)))))
@@ -455,7 +398,6 @@
       energy-map
       )))
 
-
 (define (image::seam-carving image width height)
   (let ((width-delta (- (image:width image) width))
 	(height-delta (- (image:height image) height)))
@@ -465,8 +407,6 @@
       (error "Height enlarging is not supported."))
     (dotimes (i width-delta)
       (image::sc-vertically image))
-    (dotimes (i height-delta)
-      (image::sc-horizontally))
     image))
 
 (define (main args)
